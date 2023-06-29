@@ -2,14 +2,13 @@
   (:require [cljsjs.pixi]
             [reagent.core :as r]
             [reagent.dom :as rd]
-            [cljsjs.howler]
             [clojure.string :as s]))
 
 
 ;; ------ Globals --------
 
-(def tile-size {:w 128
-                :h 64})
+(def tile-size {:w 64
+                :h 32})
 
 ;; ----- mouse coordinates -------
 
@@ -60,17 +59,26 @@
 
 ;; --------------- PIXI ------------------
 
+(defn create-sprite
+  [file-name]
+  (let [sprite (js/PIXI.Sprite.from file-name)]
+    (set! (.-x (.-scale sprite)) 0.5)
+    (set! (.-y (.-scale sprite)) 0.5)
+    sprite))
+
 (defonce initial-state
   {:pixi
    {:app
-    (js/PIXI.Application. #js{:width 2048 :height 2048
+    (js/PIXI.Application. #js{:width js/window.innerWidth
+                              :height js/window.innerHeight
                               :backgroundColor #_"0xFFFFFF" #_"0x4C7C3E"
                               "0x8B7355"
                               #_"0x5A3A22"
                               #_"0xA08D89"})
     :sprites {:background {}
               :objects {}
-              :overlays {:grid (js/PIXI.Sprite.from "images/Grid Style B - 2048x2048 - 128x64 - blue.png")}}
+              :overlays {:grid (create-sprite "images/Grid Style B - 2048x2048 - 128x64 - blue.png")
+                         #_(js/PIXI.Sprite.from "images/Grid Style B - 2048x2048 - 128x64 - blue.png")}}
     :containers {:objects (js/PIXI.Container.)}}})
 
 
@@ -91,7 +99,7 @@
                     :parsley "images/parsley.png"
                     :thyme "images/thyme.png"
                     :oregano "images/oregano.png")
-        herb-sprite (js/PIXI.Sprite.from file-name)]
+        herb-sprite (create-sprite file-name)]
     (swap! app-state
            assoc-in
            [:pixi :sprites :objects herb-id]
@@ -168,22 +176,60 @@
 
 
 ;; ---------------- mouse/input events --------------------
+#_(defn dispatch-click
+  [event]
+  (let [is-touch? (some? (aget event "touch"))
+        coords (if is-touch? 
+                 (aget (.-touches event) 0)
+                 event)
+        x (.-pageX coords)
+        y (.-pageY coords)]
+    (when-let [herb-id (:transplanting @app-state)]
+      (swap! app-state dissoc :transplanting))))
 
-(defn dispatch-click
+#_(defn dispatch-click
   [event]
   #_(js/console.log event)
-  (let [mouse-x (.-pageX event)
+  (let [is-touch? (some? (aget event "touch"))
+        coords (if)
+        touch (aget (.-touches event) 0)
+        mouse-x (.-pageX event)
         mouse-y (.-pageY event)]
 
     ;; TODO: when transplanting, plant it
     ;;       when not transplanting but over a selectable item, select item 
     
     (when-let [herb-id (:transplanting @app-state)]
-      (swap! app-state dissoc :transplanting))
-    (println mouse-x mouse-y)
-    (println (mouse->tile mouse-x mouse-y))))
+      (swap! app-state dissoc :transplanting))))
 
-(defn dispatch-move
+
+#_(defn dispatch-move
+  [event]
+  (let [is-touch? (s/includes? (.-type event) "touch")
+        coords (if is-touch? 
+                 (aget (.-changedTouches event) 0)
+                 event)
+        x (.-pageX coords)
+        y (.-pageY coords)
+        [tile-x tile-y :as tile-xy] (mouse->tile x y)
+        former-xy (:mouse-xy @app-state)]
+    (when (not= tile-xy former-xy)
+      (swap! app-state assoc :mouse-xy tile-xy)
+      (when-let [herb-id (:transplanting @app-state)]        
+        (let [herb-sprite (get-in @app-state [:pixi :sprites :objects herb-id])
+              [offset-x offset-y] (get-in @app-state [:herbs herb-id :offset])
+              
+              adjusted-x (+ tile-x offset-x)
+              adjusted-y (+ tile-y offset-y)
+
+              [screen-x screen-y] (tile->screen adjusted-x adjusted-y)]
+          (set! (.-x herb-sprite) screen-x)
+          (set! (.-y herb-sprite) screen-y)
+          (set! (.-zIndex herb-sprite) (+ tile-x tile-y)))))))
+
+
+
+#_(defn dispatch-move
   [event]
   #_(js/console.log event)
   (let [mouse-x (.-pageX event)
@@ -204,14 +250,50 @@
               adjusted-y (+ tile-y offset-y)
 
               [screen-x screen-y] (tile->screen adjusted-x adjusted-y)]
-          (println screen-x screen-y)
-          (println offset-x offset-y)
-          (println "z-index: " (+ tile-x tile-y))
           (set! (.-x herb-sprite) screen-x)
           (set! (.-y herb-sprite) screen-y)
           (set! (.-zIndex herb-sprite) (+ tile-x tile-y)
-                #_(+ adjusted-x adjusted-y))))
-      #_(println "move: " tile-xy))))
+                #_(+ adjusted-x adjusted-y)))))))
+
+
+(defn dispatch-click
+  [event]
+  (let [is-touch? (some? (aget event "touches"))
+        coords (if is-touch? 
+                 (aget (.-touches event) 0)
+                 event)
+        scroll-left (.-scrollLeft js/document.documentElement)
+        scroll-top (.-scrollTop js/document.documentElement)
+        x (if (and is-touch? coords) (+ (.-clientX coords) scroll-left) (.-pageX event))
+        y (if (and is-touch? coords) (+ (.-clientY coords) scroll-top) (.-pageY event))]
+    (when-let [herb-id (:transplanting @app-state)]
+      (swap! app-state dissoc :transplanting))))
+
+(defn dispatch-move
+  [event]
+  (let [is-touch? (some? (aget event "touches"))
+        coords (if is-touch? 
+                 (aget (.-touches event) 0)
+                 event)
+        scroll-left (.-scrollLeft js/document.documentElement)
+        scroll-top (.-scrollTop js/document.documentElement)
+        x (if (and is-touch? coords) (+ (.-clientX coords) scroll-left) (.-pageX event))
+        y (if (and is-touch? coords) (+ (.-clientY coords) scroll-top) (.-pageY event))
+        [tile-x tile-y :as tile-xy] (mouse->tile x y)
+        former-xy (:mouse-xy @app-state)]
+    (when (not= tile-xy former-xy)
+      (swap! app-state assoc :mouse-xy tile-xy)
+      (when-let [herb-id (:transplanting @app-state)]        
+        (let [herb-sprite (get-in @app-state [:pixi :sprites :objects herb-id])
+              [offset-x offset-y] (get-in @app-state [:herbs herb-id :offset])
+              
+              adjusted-x (+ tile-x offset-x)
+              adjusted-y (+ tile-y offset-y)
+
+              [screen-x screen-y] (tile->screen adjusted-x adjusted-y)]
+          (set! (.-x herb-sprite) screen-x)
+          (set! (.-y herb-sprite) screen-y)
+          (set! (.-zIndex herb-sprite) (+ tile-x tile-y)))))))
 
 
 (defn setup-inputs!
@@ -221,6 +303,13 @@
                      #(dispatch-click %))
   (.addEventListener (.. app -renderer -view)
                      "mousemove"
+                     #(dispatch-move %))
+
+  (.addEventListener (.. app -renderer -view)
+                     "touchend"
+                     #(dispatch-click %))
+  (.addEventListener (.. app -renderer -view)
+                     "touchmove"
                      #(dispatch-move %)))
 
 
@@ -229,7 +318,7 @@
 (defn ui
   []
   [:div#ui {:style {:position "fixed"
-                    :bottom 0
+                    :top 0
                     :margin 10}}
    (for [herb-key (keys herb-templates)]
      [:button {:style {:padding 20
@@ -246,9 +335,14 @@
 
 ;; -------------------------------------------
 
-(defonce _ (do (setup-pixi (:pixi @app-state))
-               (setup-inputs! (:pixi @app-state))
-               (mount-ui)))
+(defn setup-and-go!
+  []
+  (setup-pixi (:pixi @app-state))
+  (setup-inputs! (:pixi @app-state))
+  (mount-ui))
+
+(defonce _ (setup-and-go!))
+
 
 (defonce elapsed (atom 0.0))
 
@@ -256,11 +350,3 @@
       (fn [delta]
         (swap! elapsed + delta)
         (set! (.-x pixi-sprite) @elapsed)))
-
-
-;; --------------- Howler ------------------
-
-(def sound (js/Howl. #js{:src "sounds/drop_001.ogg"}))
-
-;; eval this to play the sound
-#_(.play sound)
